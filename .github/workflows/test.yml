@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Install the cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: |
+          brew tap --custom-remote spatie/bloom "$GITHUB_WORKSPACE"
+          brew style spatie/bloom/spatie-bloom
+          brew audit --cask spatie/bloom/spatie-bloom
+          brew install --cask spatie/bloom/spatie-bloom
+          test -d /Applications/Bloom.app
+          codesign --verify --deep --strict /Applications/Bloom.app
