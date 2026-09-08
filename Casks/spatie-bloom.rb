@@ -16,7 +16,7 @@ cask "spatie-bloom" do
   auto_updates true
   conflicts_with cask: "bloom"
   depends_on arch: :arm64
-  depends_on macos: ">= :tahoe"
+  depends_on macos: :tahoe
 
   app "Bloom.app"
 end
