@@ -1,6 +1,6 @@
 cask "spatie-bloom" do
-  version "1.10.0"
-  sha256 "937fce2fac3608659ccd0df45a0a37a8f20e8506e4f308a9adbcc175ab2a0cae"
+  version "1.10.1"
+  sha256 "75685382d2bfade3fd85810ea757fbed92b6e27da0a0a5e64dc7c0d9903ceee7"
 
   url "https://github.com/spatie/bloom/releases/download/v#{version}/Bloom-#{version}.dmg",
       verified: "github.com/spatie/bloom/"
