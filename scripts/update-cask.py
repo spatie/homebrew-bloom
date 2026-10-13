@@ -1,33 +1,66 @@
 #!/usr/bin/env python3
-"""Update the cask only after a stable release's disk image is available."""
+"""Update the cask from the latest stable disk image in Bloom's appcast."""
 
 import hashlib
-import json
 from pathlib import Path
 import re
-import subprocess
-import tempfile
+from urllib.request import urlopen
+import xml.etree.ElementTree as ET
+
+
+FEED_URL = "https://downloads.runbloom.app/appcast.xml"
+DOWNLOAD_BASE = "https://downloads.runbloom.app"
+SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+BLOOM = "https://runbloom.app/xml-namespaces/bloom"
+
+
+def latest_stable_image(feed):
+    root = ET.fromstring(feed)
+    for item in root.findall("./channel/item"):
+        if item.findtext(f"{{{SPARKLE}}}channel"):
+            continue
+
+        version = item.findtext(f"{{{SPARKLE}}}shortVersionString") or ""
+        if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            raise SystemExit(f"Unexpected stable version in appcast: {version!r}")
+
+        image = item.find(f"{{{BLOOM}}}diskImage")
+        if image is None:
+            print(f"Waiting for Bloom {version}'s disk image.")
+            return None
+
+        url = f"{DOWNLOAD_BASE}/Bloom-{version}.dmg"
+        if image.get("url") != url:
+            raise SystemExit(f"Unexpected disk image URL for Bloom {version}.")
+        length = image.get("length") or ""
+        if not length.isdecimal() or int(length) <= 0:
+            raise SystemExit(f"Invalid disk image length for Bloom {version}.")
+        return version, url, int(length)
+
+    raise SystemExit("No stable release in Bloom's appcast.")
+
+
+def disk_image_checksum(url, expected_length):
+    digest = hashlib.sha256()
+    size = 0
+    with urlopen(url, timeout=60) as image:
+        while chunk := image.read(1024 * 1024):
+            size += len(chunk)
+            if size > expected_length:
+                raise SystemExit("Disk image exceeds its appcast length.")
+            digest.update(chunk)
+    if size != expected_length:
+        raise SystemExit("Disk image does not match its appcast length.")
+    return digest.hexdigest()
 
 
 def main():
-    release = json.loads(subprocess.check_output(
-        ["gh", "api", "repos/spatie/bloom/releases/latest"], text=True,
-    ))
-    tag = release["tag_name"]
-    if release["draft"] or release["prerelease"] or not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
-        raise SystemExit("The latest release is not a stable version.")
-
-    version = tag[1:]
-    name = f"Bloom-{version}.dmg"
-    asset = next((asset for asset in release["assets"] if asset["name"] == name), None)
-    if asset is None or asset["state"] != "uploaded":
-        print(f"Waiting for {name} to be uploaded.")
+    with urlopen(FEED_URL, timeout=20) as response:
+        release = latest_stable_image(response.read())
+    if release is None:
         return
+    version, url, length = release
 
-    digest = asset.get("digest") or ""
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-        raise SystemExit("The disk image has no valid SHA-256 digest.")
-    checksum = digest.removeprefix("sha256:")
     cask = Path(__file__).resolve().parents[1] / "Casks/spatie-bloom.rb"
     original = cask.read_text()
     current = re.search(r'^  version "(\d+\.\d+\.\d+)"$', original, re.MULTILINE)
@@ -35,6 +68,8 @@ def main():
         raise SystemExit("Cannot find the current cask version.")
     if tuple(map(int, version.split("."))) < tuple(map(int, current[1].split("."))):
         raise SystemExit("Refusing to downgrade the cask.")
+
+    checksum = disk_image_checksum(url, length)
     updated, versions = re.subn(r'^  version ".*"$', f'  version "{version}"', original, flags=re.MULTILINE)
     updated, checksums = re.subn(r'^  sha256 ".*"$', f'  sha256 "{checksum}"', updated, flags=re.MULTILINE)
     if versions != 1 or checksums != 1:
@@ -42,15 +77,6 @@ def main():
     if updated == original:
         print(f"Bloom {version} is already current.")
         return
-
-    with tempfile.TemporaryDirectory() as directory:
-        subprocess.run([
-            "gh", "release", "download", tag, "--repo", "spatie/bloom",
-            "--pattern", name, "--dir", directory,
-        ], check=True)
-        actual = hashlib.sha256((Path(directory) / name).read_bytes()).hexdigest()
-        if actual != checksum:
-            raise SystemExit("The downloaded disk image does not match GitHub's checksum.")
 
     cask.write_text(updated)
     print(f"Updated Bloom to {version}.")

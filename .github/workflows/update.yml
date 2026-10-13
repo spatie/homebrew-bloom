@@ -19,8 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Update from the latest stable release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/update-cask.py
       - name: Commit the update
         run: |

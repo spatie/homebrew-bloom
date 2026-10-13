@@ -17,12 +17,12 @@ brew update
 brew upgrade --cask --greedy spatie/bloom/spatie-bloom
 ```
 
-The update workflow checks for stable [GitHub releases](https://github.com/spatie/bloom/releases)
-every hour. It waits until the disk image is uploaded, verifies its SHA-256 against
-GitHub's asset digest, and commits the new version and checksum. It can also be run
-manually from GitHub Actions. No separate access token is needed.
+The update workflow checks [Bloom's appcast](https://downloads.runbloom.app/appcast.xml)
+for the latest stable release every hour. It downloads the disk image, checks its
+length against the appcast, computes its SHA-256, and commits the new version and
+checksum. It can also be run manually from GitHub Actions.
 
-To update locally, with the GitHub CLI installed:
+To update locally:
 
 ```sh
 python3 scripts/update-cask.py
