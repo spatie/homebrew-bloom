@@ -1,6 +1,6 @@
 import hashlib
 import importlib.util
-import json
+from io import BytesIO
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,69 +12,75 @@ updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 
 
+def item(version, *, channel="", image=True, url=None, length=None):
+    channel_xml = f"<sparkle:channel>{channel}</sparkle:channel>" if channel else ""
+    image_xml = ""
+    if image:
+        image_url = url or f"{updater.DOWNLOAD_BASE}/Bloom-{version}.dmg"
+        image_length = length if length is not None else len(b"disk image")
+        image_xml = f'<bloom:diskImage url="{image_url}" length="{image_length}" />'
+    return f"<item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>{channel_xml}{image_xml}</item>"
+
+
+def feed(*items):
+    return (f'<rss xmlns:sparkle="{updater.SPARKLE}" xmlns:bloom="{updater.BLOOM}">'
+            f'<channel>{"".join(items)}</channel></rss>').encode()
+
+
 class UpdateCaskTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
-        (self.root / "scripts").mkdir()
-        (self.root / "Casks").mkdir()
-        self.cask = self.root / "Casks/spatie-bloom.rb"
+        root = Path(self.directory.name)
+        (root / "scripts").mkdir()
+        (root / "Casks").mkdir()
+        self.cask = root / "Casks/spatie-bloom.rb"
         self.original = 'cask "spatie-bloom" do\n  version "1.4.0"\n  sha256 "old"\nend\n'
         self.cask.write_text(self.original)
-        self.release = {
-            "tag_name": "v1.5.0", "draft": False, "prerelease": False,
-            "assets": [{"name": "Bloom-1.5.0.dmg", "state": "uploaded",
-                        "digest": "sha256:" + hashlib.sha256(b"disk image").hexdigest()}],
-        }
+        self.feed = feed(item("1.5.0"))
+        self.image = b"disk image"
         self.addCleanup(patch.stopall)
-        patch.object(updater, "__file__", str(self.root / "scripts/update-cask.py")).start()
-        self.api = patch.object(updater.subprocess, "check_output").start()
-        self.download = patch.object(updater.subprocess, "run", side_effect=self.write_download).start()
+        patch.object(updater, "__file__", str(root / "scripts/update-cask.py")).start()
+        self.open_url = patch.object(updater, "urlopen", side_effect=self.open_response).start()
 
-    def write_download(self, command, **kwargs):
-        (Path(command[-1]) / "Bloom-1.5.0.dmg").write_bytes(b"disk image")
+    def open_response(self, url, **kwargs):
+        if url == updater.FEED_URL:
+            return BytesIO(self.feed)
+        if url == f"{updater.DOWNLOAD_BASE}/Bloom-1.5.0.dmg":
+            return BytesIO(self.image)
+        self.fail(f"Unexpected download: {url}")
 
-    def run_update(self):
-        self.api.return_value = json.dumps(self.release)
+    def test_updates_from_stable_image_and_is_idempotent(self):
+        self.feed = feed(item("1.6.0", channel="beta"), item("1.5.0"))
         updater.main()
-
-    def test_update_verifies_download_and_is_idempotent(self):
-        self.run_update()
         self.assertIn('version "1.5.0"', self.cask.read_text())
-        self.assertIn(hashlib.sha256(b"disk image").hexdigest(), self.cask.read_text())
-        self.run_update()
-        self.download.assert_called_once()
+        self.assertIn(hashlib.sha256(self.image).hexdigest(), self.cask.read_text())
+        updater.main()
+        self.assertEqual(self.open_url.call_count, 4)
 
-    def test_waits_for_release_asset(self):
-        self.release["assets"] = []
-        self.run_update()
+    def test_waits_for_latest_stable_image(self):
+        self.feed = feed(item("1.5.0", image=False), item("1.4.0"))
+        updater.main()
         self.assertEqual(self.original, self.cask.read_text())
-        self.download.assert_not_called()
+        self.open_url.assert_called_once()
 
-    def test_rejects_prerelease(self):
-        self.release["prerelease"] = True
+    def test_rejects_unexpected_image_url(self):
+        self.feed = feed(item("1.5.0", url="https://example.com/Bloom-1.5.0.dmg"))
         with self.assertRaises(SystemExit):
-            self.run_update()
-        self.assertEqual(self.original, self.cask.read_text())
-
-    def test_rejects_invalid_digest(self):
-        self.release["assets"][0]["digest"] = None
-        with self.assertRaises(SystemExit):
-            self.run_update()
+            updater.main()
         self.assertEqual(self.original, self.cask.read_text())
 
-    def test_rejects_checksum_mismatch(self):
-        self.release["assets"][0]["digest"] = "sha256:" + "0" * 64
+    def test_rejects_incomplete_download(self):
+        self.feed = feed(item("1.5.0", length=20))
         with self.assertRaises(SystemExit):
-            self.run_update()
+            updater.main()
         self.assertEqual(self.original, self.cask.read_text())
 
     def test_refuses_downgrade(self):
         self.cask.write_text(self.original.replace("1.4.0", "1.6.0"))
         with self.assertRaises(SystemExit):
-            self.run_update()
-        self.download.assert_not_called()
+            updater.main()
+        self.open_url.assert_called_once()
 
 
 if __name__ == "__main__":

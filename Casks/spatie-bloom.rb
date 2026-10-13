@@ -1,16 +1,11 @@
 cask "spatie-bloom" do
-  version "1.31.0"
-  sha256 "b8c34dea8ad556938d93c22a3f29f5da4f55540ec45f1d8e5dfb75cf986b2e03"
+  version "1.38.18"
+  sha256 "1a9466e6af069937ec71a6b4128d4e9016bca27c9a5121447a1da413d94c1448"
 
-  url "https://github.com/spatie/bloom/releases/download/v#{version}/Bloom-#{version}.dmg"
+  url "https://downloads.runbloom.app/Bloom-#{version}.dmg"
   name "Bloom"
   desc "Agent development environment"
   homepage "https://runbloom.app/"
-
-  livecheck do
-    url :url
-    strategy :github_latest
-  end
 
   auto_updates true
   conflicts_with cask: "bloom"
