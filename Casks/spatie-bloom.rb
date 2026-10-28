@@ -1,6 +1,6 @@
 cask "spatie-bloom" do
-  version "1.39.5"
-  sha256 "bb57e3cdf3bc0da6942bbf0adef4bd11b37e63b476bef12034638016a03a9be4"
+  version "1.39.6"
+  sha256 "3d7916df54469f02ebb0e2ec51aeba37d4a724a2cbb74e78a3b476c87ea5a376"
 
   url "https://downloads.runbloom.app/Bloom-#{version}.dmg"
   name "Bloom"
